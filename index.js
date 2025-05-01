@@ -58,9 +58,10 @@ server.tool(
   {
     address: z.string().describe("Wallet address to check token balances for"),
     tokenAddress: z.string().optional().describe("Optional: Specific token address to check (if only checking one token)"),
+    additionalTokens: z.array(z.string()).optional().describe("Optional: Additional token addresses to check"),
     includeZeroBalances: z.boolean().default(false).describe("Whether to include tokens with zero balance")
   },
-  async ({ address, tokenAddress, includeZeroBalances }) => {
+  async ({ address, tokenAddress, additionalTokens, includeZeroBalances }) => {
     try {
       const provider = getProvider();
 
@@ -141,54 +142,21 @@ server.tool(
         }
       }
       
-      const currentBlock = await provider.getBlockNumber();
-      const fromBlock = Math.max(1, currentBlock - 10000);
-      
-      const transferEventSignature = "Transfer(address,address,uint256)";
-      const transferTopic = ethers.utils.id(transferEventSignature);
-      
-      let discoveredTokens = new Set();
-      
-      try {
-        const receivedFilter = {
-          fromBlock,
-          toBlock: currentBlock,
-          topics: [
-            transferTopic,
-            null,
-            ethers.utils.hexZeroPad(address.toLowerCase(), 32)
-          ]
-        };
-        
-        const sentFilter = {
-          fromBlock,
-          toBlock: currentBlock,
-          topics: [
-            transferTopic,
-            ethers.utils.hexZeroPad(address.toLowerCase(), 32)
-          ]
-        };
-        
-        const [receivedLogs, sentLogs] = await Promise.all([
-          provider.getLogs(receivedFilter),
-          provider.getLogs(sentFilter)
-        ]);
-        
-        [...receivedLogs, ...sentLogs].forEach(log => {
-          discoveredTokens.add(log.address);
-        });
-      } catch (error) {
-        discoveredTokens = new Set(COMMON_BERACHAIN_TOKENS);
-      }
+      let tokenAddressesToCheck = [...COMMON_BERACHAIN_TOKENS];
 
-      if (discoveredTokens.size === 0) {
-        discoveredTokens = new Set(COMMON_BERACHAIN_TOKENS);
+      if (additionalTokens && Array.isArray(additionalTokens) && additionalTokens.length > 0) {
+        const newTokens = additionalTokens.filter(addr => 
+          !tokenAddressesToCheck.includes(addr) && 
+          ethers.utils.isAddress(addr)
+        );
+        tokenAddressesToCheck = [...tokenAddressesToCheck, ...newTokens];
       }
-
-      const tokenPromises = Array.from(discoveredTokens).map(async (tokenAddr) => {
+      
+      const tokenPromises = tokenAddressesToCheck.map(async (tokenAddr) => {
         try {
           const tokenContract = new ethers.Contract(tokenAddr, ERC20ABI, provider);
           const balance = await tokenContract.balanceOf(address);
+          
           if (!includeZeroBalances && balance.isZero()) {
             return null;
           }
