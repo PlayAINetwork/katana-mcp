@@ -21,12 +21,12 @@ Add the following to your MCP configuration file:
 ## Available Tools
 
 ### getBalance
-**Description**: Retrieves all token balances for a wallet address on Berachain.
+**Description**: get all token balances for a wallet address on Berachain.
 
 **Parameters**:
-- `address` (required): Wallet address to check balances for
-- `tokenAddress` (optional): Specific token address to check
-- `includeZeroBalances` (optional): Whether to include tokens with zero balance
+- `address` (required): The wallet address to check balances for
+- `tokenAddress` (optional): A specific token address to check (if you only want one token's balance)
+- `additional Token` (optional) : additional token addresses to check beyond the common tokens.
 
 **Example Prompt**:
 ```
@@ -34,7 +34,7 @@ Get all token balances for wallet {address}
 ```
 
 **Response**:
-![Screenshot 2025-05-01 142923](https://github.com/user-attachments/assets/e4230236-c431-4c7b-81fc-a98fb34c0d37)
+![Screenshot 2025-05-01 150407](https://github.com/user-attachments/assets/dd570f78-31d4-4790-b72c-6024b8837f7d)
 
 
 
