@@ -67,8 +67,8 @@ WALLET_PRIVATE_KEY=your_private_key_here
 {
   "mcpServers": {
     "tatara": {
-      "command": "node",
-      "args": ["/path/to/your/tatara-mcp-server/index.js"],
+      "command": "npx",
+      "args": ["katana-mcp"],
       "env": {
         "TATARA_RPC_URL": "https://your-tatara-rpc-endpoint.com",
         "WALLET_PRIVATE_KEY": "your_private_key_here"
