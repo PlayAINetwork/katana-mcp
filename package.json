@@ -1,14 +1,38 @@
 {
-  "name": "bera-mcp",
-  "version": "1.0.0",
+  "name": "katana-mcp",
+  "version": "1.0.2",
+  "description": "Katana MCP server for blockchain interactions and data retrieval",
   "main": "index.js",
+  "bin": {
+    "katana-mcp": "./index.js"
+  },
   "scripts": {
+    "start": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "blockchain",
+    "ethereum",
+    "web3",
+    "defi"
+  ],
+  "author": "PlayAI Org",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PlayAINetwork/katana-mcp"
+  },
+  "homepage": "https://github.com/PlayAINetwork/katana-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/PlayAINetwork/katana-mcp/issues"
+  },
+  "files": [
+    "index.js",
+    "README.md",
+    "LICENSE"
+  ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.10.2",
     "dotenv": "^16.5.0",

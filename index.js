@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 const { McpServer } = require("@modelcontextprotocol/sdk/server/mcp.js");
 const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio.js");
 const { z } = require("zod");
@@ -171,6 +173,21 @@ function getDefaultWallet() {
   }
 }
 
+function getDefaultAddress() {
+  const privateKey = process.env.WALLET_PRIVATE_KEY;
+  if (!privateKey) {
+    throw new Error("WALLET_PRIVATE_KEY environment variable is not set in MCP configuration");
+  }
+  
+  try {
+    const cleanKey = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
+    const wallet = new ethers.Wallet(cleanKey);
+    return wallet.address;
+  } catch (error) {
+    throw new Error(`Failed to derive address from private key: ${error.message}`);
+  }
+}
+
 function formatBalance(balance, decimals) {
   return ethers.utils.formatUnits(balance, decimals);
 }
@@ -190,24 +207,26 @@ const server = new McpServer({
   description: "Complete MCP server for Tatara chain with Yearn, Sushi, and Agglayer Bridge"
 });
 
-//tool 1: get wallet balances
+//tool 1: get wallet balances 
 server.tool(
   "getWalletBalances",
-  "Get token balances for a wallet address on Tatara chain, including Yearn vault positions",
+  "Get token balances for your wallet address on Tatara chain (uses address from private key in environment), including Yearn vault positions",
   {
-    address: z.string().describe("Wallet address to check token balances for"),
+    address: z.string().optional().describe("Optional: Wallet address to check token balances for (defaults to address from private key in env)"),
     additionalTokens: z.array(z.string()).optional().describe("Optional: Additional token addresses to check"),
     includeZeroBalances: z.boolean().default(false).describe("Whether to include tokens with zero balance"),
     includeYearnVaults: z.boolean().default(true).describe("Whether to include Yearn vault balances")
   },
   async ({ address, additionalTokens, includeZeroBalances, includeYearnVaults }) => {
     try {
-      if (!isValidAddress(address)) {
-        throw new Error(`Invalid wallet address: ${address}`);
+      const targetAddress = address || getDefaultAddress();
+      
+      if (!isValidAddress(targetAddress)) {
+        throw new Error(`Invalid wallet address: ${targetAddress}`);
       }
 
       const provider = getProvider();
-      const nativeBalance = await provider.getBalance(address);
+      const nativeBalance = await provider.getBalance(targetAddress);
       const formattedNativeBalance = formatBalance(nativeBalance, TATARA_CONFIG.nativeCurrency.decimals);
 
       let tokenAddressesToCheck = [...COMMON_TATARA_TOKENS];
@@ -226,7 +245,7 @@ server.tool(
       const tokenPromises = tokenAddressesToCheck.map(async (tokenAddr) => {
         try {
           const tokenContract = new ethers.Contract(tokenAddr, ERC20_ABI, provider);
-          const balance = await tokenContract.balanceOf(address);
+          const balance = await tokenContract.balanceOf(targetAddress);
           
           const [symbol, name, decimals] = await Promise.all([
             tokenContract.symbol().catch(() => "UNKNOWN"),
@@ -273,7 +292,8 @@ server.tool(
       const filteredTokens = includeZeroBalances ? tokens : tokens.filter(token => token.hasBalance);
 
       const result = {
-        address,
+        address: targetAddress,
+        addressSource: address ? "provided" : "derived_from_private_key",
         nativeToken: {
           symbol: TATARA_CONFIG.nativeCurrency.symbol,
           name: TATARA_CONFIG.nativeCurrency.name,
@@ -299,7 +319,7 @@ server.tool(
           text: JSON.stringify({
             status: "error",
             message: `Failed to get wallet token balances: ${error.message}`,
-            address
+            address: address || "derived_from_private_key"
           }, null, 2)
         }]
       };
@@ -310,24 +330,26 @@ server.tool(
 //tool 2: get eth and weth balances from wallet
 server.tool(
   "getEthWethBalances",
-  "Get ETH and WETH balances for a wallet address on Tatara",
+  "Get ETH and WETH balances for your wallet address on Tatara (uses address from private key in environment)",
   {
-    address: z.string().describe("Wallet address to check balances for")
+    address: z.string().optional().describe("Optional: Wallet address to check balances for (defaults to address from private key in env)")
   },
   async ({ address }) => {
     try {
-      if (!isValidAddress(address)) {
-        throw new Error(`Invalid wallet address: ${address}`);
+      const targetAddress = address || getDefaultAddress();
+      
+      if (!isValidAddress(targetAddress)) {
+        throw new Error(`Invalid wallet address: ${targetAddress}`);
       }
 
       const provider = getProvider();
-      const ethBalance = await provider.getBalance(address);
+      const ethBalance = await provider.getBalance(targetAddress);
       const formattedEthBalance = formatBalance(ethBalance, TATARA_CONFIG.nativeCurrency.decimals);
 
       const wethContract = new ethers.Contract(TATARA_WETH_ADDRESS, ERC20_ABI, provider);
       
       try {
-        const wethBalance = await wethContract.balanceOf(address);
+        const wethBalance = await wethContract.balanceOf(targetAddress);
         
         const [symbol, name, decimals] = await Promise.all([
           wethContract.symbol().catch(() => "WETH"),
@@ -341,7 +363,8 @@ server.tool(
           content: [{
             type: "text",
             text: JSON.stringify({
-              address,
+              address: targetAddress,
+              addressSource: address ? "provided" : "derived_from_private_key",
               ethBalance: {
                 symbol: TATARA_CONFIG.nativeCurrency.symbol,
                 name: TATARA_CONFIG.nativeCurrency.name,
@@ -364,7 +387,8 @@ server.tool(
           content: [{
             type: "text",
             text: JSON.stringify({
-              address,
+              address: targetAddress,
+              addressSource: address ? "provided" : "derived_from_private_key",
               ethBalance: {
                 symbol: TATARA_CONFIG.nativeCurrency.symbol,
                 name: TATARA_CONFIG.nativeCurrency.name,
@@ -388,7 +412,7 @@ server.tool(
           text: JSON.stringify({
             status: "error",
             message: `Failed to get ETH/WETH balances: ${error.message}`,
-            address
+            address: address || "derived_from_private_key"
           }, null, 2)
         }]
       };
@@ -440,18 +464,24 @@ server.tool(
             blockNumber: receipt.blockNumber,
             gasUsed: receipt.gasUsed.toString(),
             walletAddress,
-            wethAddress: TATARA_WETH_ADDRESS,
-            amountWrapped: amount,
+            vaultAddress,
+            vaultSymbol,
+            underlyingAsset: {
+              address: asset,
+              symbol: assetSymbol
+            },
+            amountDeposited: amount,
+            expectedShares: formatBalance(expectedShares, vaultDecimals),
+            actualShares: formatBalance(finalVaultBalance.sub(initialVaultBalance), vaultDecimals),
             balanceChanges: {
-              ethBalance: {
-                before: formatBalance(initialEthBalance, 18),
-                after: formatBalance(finalEthBalance, 18),
-                change: formatBalance(initialEthBalance.sub(finalEthBalance), 18)
+              assetBalance: {
+                after: formatBalance(finalAssetBalance, assetDecimals),
+                change: formatBalance(initialAssetBalance.sub(finalAssetBalance), assetDecimals)
               },
-              wethBalance: {
-                before: formatBalance(initialWethBalance, 18),
-                after: formatBalance(finalWethBalance, 18),
-                change: formatBalance(finalWethBalance.sub(initialWethBalance), 18)
+              vaultBalance: {
+                before: formatBalance(initialVaultBalance, vaultDecimals),
+                after: formatBalance(finalVaultBalance, vaultDecimals),
+                change: formatBalance(finalVaultBalance.sub(initialVaultBalance), vaultDecimals)
               }
             },
             timestamp: new Date().toISOString()
@@ -464,8 +494,8 @@ server.tool(
           type: "text",
           text: JSON.stringify({
             status: "error",
-            message: `Failed to wrap ETH: ${error.message}`,
-            wethAddress: TATARA_WETH_ADDRESS,
+            message: `Failed to deposit to vault: ${error.message}`,
+            vaultAddress,
             amount
           }, null, 2)
         }]
@@ -474,7 +504,6 @@ server.tool(
   }
 );
 
-//tool 4: unwrap weth to eth
 server.tool(
   "unwrapWeth",
   "Unwrap WETH back to ETH on Tatara chain using wallet from environment variable",
@@ -906,14 +935,16 @@ server.tool(
 //tool 8: get user's yearn vault positions
 server.tool(
   "getUserYearnPositions",
-  "Get detailed information about a user's positions in Yearn vaults",
+  "Get detailed information about your Yearn vault positions (uses address from private key in environment)",
   {
-    address: z.string().describe("Wallet address to check Yearn positions for")
+    address: z.string().optional().describe("Optional: Wallet address to check Yearn positions for (defaults to address from private key in env)")
   },
   async ({ address }) => {
     try {
-      if (!isValidAddress(address)) {
-        throw new Error(`Invalid wallet address: ${address}`);
+      const targetAddress = address || getDefaultAddress();
+      
+      if (!isValidAddress(targetAddress)) {
+        throw new Error(`Invalid wallet address: ${targetAddress}`);
       }
 
       const provider = getProvider();
@@ -922,7 +953,7 @@ server.tool(
       const positionPromises = vaultAddresses.map(async (vaultAddress) => {
         try {
           const vaultContract = new ethers.Contract(vaultAddress, ERC4626_ABI, provider);
-          const shareBalance = await vaultContract.balanceOf(address);
+          const shareBalance = await vaultContract.balanceOf(targetAddress);
 
           if (shareBalance.isZero()) {
             return null;
@@ -992,7 +1023,8 @@ server.tool(
         content: [{
           type: "text",
           text: JSON.stringify({
-            address,
+            address: targetAddress,
+            addressSource: address ? "provided" : "derived_from_private_key",
             totalPositions: positions.length,
             positions,
             timestamp: new Date().toISOString()
@@ -1006,7 +1038,7 @@ server.tool(
           text: JSON.stringify({
             status: "error",
             message: `Failed to get Yearn positions: ${error.message}`,
-            address
+            address: address || "derived_from_private_key"
           }, null, 2)
         }]
       };
@@ -1397,4 +1429,4 @@ async function startServer() {
   }
 }
 
-startServer();
+startServer()
